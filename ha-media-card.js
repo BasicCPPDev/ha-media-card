@@ -1,5 +1,5 @@
 /**
- * Media Card v5.3.5
+ * Media Card v5.4.0
  */
 
 // Import Lit from CDN for standalone usage
@@ -1023,7 +1023,32 @@ class MediaIndexProvider extends MediaProvider {
           this.queue.unshift(...newItems);
           this._log('Refilled queue with', newItems.length, 'items, now', this.queue.length, 'total');
         } else {
-          this._log('All items were duplicates/history and retry failed - queue not refilled');
+          // V5 RECOVERY: All items were filtered - history is exhausted
+          // Clear history tracking to allow items to cycle back
+          this._log('⚠️ All items filtered - history exhausted! Clearing history to allow cycling');
+          if (this.card && this.card.history) {
+            // Keep only the most recent 10% of history to maintain some variety
+            const keepCount = Math.max(10, Math.floor(this.card.history.length * 0.1));
+            const removed = this.card.history.length - keepCount;
+            this.card.history = this.card.history.slice(-keepCount);
+            this.card.historyIndex = -1; // Reset to end position
+            this._log('🔄 Cleared', removed, 'oldest history items, kept', keepCount);
+
+            // Retry query immediately with cleared history
+            const retryItems = await this._queryMediaIndex(this.queueSize, false);
+            if (retryItems && retryItems.length > 0) {
+              const remainingHistoryPaths = new Set(this.card.history.map(h => h.media_content_id));
+              const recoveredItems = retryItems.filter(item =>
+                !existingPaths.has(item.path) && !remainingHistoryPaths.has(item.path)
+              );
+              if (recoveredItems.length > 0) {
+                this.queue.unshift(...recoveredItems);
+                this._log('✅ Recovery successful! Added', recoveredItems.length, 'items to queue');
+              } else {
+                this._log('⚠️ Recovery query also returned all duplicates');
+              }
+            }
+          }
         }
       }
     }
@@ -2788,7 +2813,7 @@ class MediaCardV5a extends LitElement {
 
       const stateToStore = {
         navigationHistory: [...this.history],  // Clone array
-        historyIndex: this.historyPosition
+        historyIndex: this.historyIndex
       };
 
       // If using SubfolderQueue, store the queue instance for reconnection
@@ -3064,7 +3089,7 @@ class MediaCardV5a extends LitElement {
       this._log('📋 Initializing empty navigation state (new card)');
       this.queue = [];
       this.history = [];
-      this.historyPosition = -1;
+      this.historyIndex = -1;
       this.shownItems = new Set();
       this.currentMedia = null;
       this._currentMediaPath = null;
@@ -3208,8 +3233,8 @@ class MediaCardV5a extends LitElement {
       // Restore navigation history and position
       if (storedData.navigationHistory) {
         this.history = storedData.navigationHistory;
-        this.historyPosition = storedData.historyIndex !== undefined ? storedData.historyIndex : -1;
-        this._log('📚 Restored navigation history:', this.history.length, 'items, position:', this.historyPosition);
+        this.historyIndex = storedData.historyIndex !== undefined ? storedData.historyIndex : -1;
+        this._log('📚 Restored navigation history:', this.history.length, 'items, position:', this.historyIndex);
       }
 
       // For SubfolderQueue, reconnect to existing queue instance
@@ -3270,9 +3295,9 @@ class MediaCardV5a extends LitElement {
 
       if (success) {
         // V5 FIX: If we reconnected with history, restore current media from history
-        if (this.history.length > 0 && this.historyPosition >= 0) {
-          this._log('🔄 Reconnected with history - loading media at position', this.historyPosition);
-          const historyItem = this.history[this.historyPosition];
+        if (this.history.length > 0 && this.historyIndex >= 0) {
+          this._log('🔄 Reconnected with history - loading media at position', this.historyIndex);
+          const historyItem = this.history[this.historyIndex];
           if (historyItem) {
             this.currentMedia = historyItem;
             await this._resolveMediaUrl();
@@ -3386,14 +3411,17 @@ class MediaCardV5a extends LitElement {
 
         await this._resolveMediaUrl();
         this.requestUpdate(); // Force re-render
-
-        // V5: Setup auto-advance after successfully loading media
-        this._setupAutoRefresh();
       } else {
         this._log('Provider returned null item');
       }
+
+      // V5: Setup auto-advance after loading attempt (even if null)
+      // This ensures the slideshow keeps trying to get items even if queue was temporarily empty
+      this._setupAutoRefresh();
     } catch (error) {
       console.error('[MediaCardV5a] Error loading next media:', error);
+      // V5: Restart auto-advance even on error to prevent slideshow from stopping
+      this._setupAutoRefresh();
     }
   }
 
@@ -3472,6 +3500,8 @@ class MediaCardV5a extends LitElement {
         const oldInterval = this._refreshInterval;
         this._log(`🔄 Resetting auto-refresh timer due to manual navigation (clearing interval ${oldInterval}, will create new one)`);
         this._lastRefreshTime = Date.now();
+        // V5 FIX: Clear pausedForNavigation flag so timer can restart
+        this._pausedForNavigation = false;
         // Restart the timer (this will clear old interval and create new one)
         this._setupAutoRefresh();
         this._log(`✅ Auto-refresh timer reset complete - old interval: ${oldInterval}, new interval: ${this._refreshInterval}`);
@@ -3496,6 +3526,12 @@ class MediaCardV5a extends LitElement {
 
     if (this._backgroundPaused) {
       this._log('🔄 Auto-refresh setup skipped - background paused (not visible)');
+      return;
+    }
+
+    // V5 FIX: Check if paused due to manual navigation in 'pause' mode
+    if (this._pausedForNavigation) {
+      this._log('🔄 Auto-refresh setup skipped - paused due to manual navigation (pause mode)');
       return;
     }
 
@@ -3546,7 +3582,7 @@ class MediaCardV5a extends LitElement {
           } else {
             // Advance to next media (folder mode with auto_advance)
             this._log('🔄 Auto-advance timer triggered - loading next media');
-            this._loadNext();
+            await this._loadNext();
           }
         } else {
           this._log(`🔄 ${modeLabel} skipped - isPaused:`, this._isPaused, 'backgroundPaused:', this._backgroundPaused);
@@ -10972,7 +11008,7 @@ if (!window.customCards.some(card => card.type === 'media-card')) {
 }
 
 console.info(
-  '%c  MEDIA-CARD  %c  v5.3.5 Loaded  ',
+  '%c  MEDIA-CARD  %c  v5.4.0 Loaded  ',
   'color: lime; font-weight: bold; background: black',
   'color: white; font-weight: bold; background: green'
 );
