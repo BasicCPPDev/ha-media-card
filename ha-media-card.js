@@ -1,5 +1,5 @@
 /**
- * Media Card v5.3.1
+ * Media Card v5.3.2
  */
 
 // Import Lit from CDN for standalone usage
@@ -1227,18 +1227,18 @@ class MediaIndexProvider extends MediaProvider {
   }
 
   // V4 CODE REUSE: Copied from ha-media-card.js _resolveMediaPath (lines ~2350)
-  // Convert /media/Photo/... path to media-source://media_source/media/Photo/...
+  // Convert /media/X path to media-source://media_source/local/X
   async _resolveMediaPath(filePath) {
-    // V4 pattern: If path starts with /media/, convert to media-source:// URL
+    // /media/X -> media-source://media_source/local/X
     if (filePath.startsWith('/media/')) {
-      return `media-source://media_source${filePath}`;
+      return `media-source://media_source/local${filePath.substring(6)}`;
     }
     // If already media-source:// format, return as-is
     if (filePath.startsWith('media-source://')) {
       return filePath;
     }
     // Otherwise assume it's a relative path under /media/
-    return `media-source://media_source/media/${filePath}`;
+    return `media-source://media_source/local/${filePath}`;
   }
 
   // Track files that have been moved to _Junk/_Edit folders
@@ -1549,14 +1549,15 @@ class SequentialMediaIndexProvider extends MediaProvider {
   }
 
   // Reuse from MediaIndexProvider
+  // Convert /media/X path to media-source://media_source/local/X
   async _resolveMediaPath(filePath) {
     if (filePath.startsWith('/media/')) {
-      return `media-source://media_source${filePath}`;
+      return `media-source://media_source/local${filePath.substring(6)}`;
     }
     if (filePath.startsWith('media-source://')) {
       return filePath;
     }
-    return `media-source://media_source/media/${filePath}`;
+    return `media-source://media_source/local/${filePath}`;
   }
 
   // Track excluded files
@@ -3658,8 +3659,9 @@ class MediaCardV5a extends LitElement {
     const MAX_VALIDATION_ATTEMPTS = 10;
     
     // If /media/ path, convert to media-source:// and validate existence
+    // /media/X -> media-source://media_source/local/X
     if (mediaId.startsWith('/media/')) {
-      const mediaSourceId = 'media-source://media_source' + mediaId;
+      const mediaSourceId = 'media-source://media_source/local' + mediaId.substring(6);
       this._log('Converting /media/ to media-source://', mediaSourceId);
       
       try {
@@ -3710,7 +3712,7 @@ class MediaCardV5a extends LitElement {
         
         // Recursively skip to next item without adding to history
         this._log('⏭️ Skipping to next item due to missing file (depth:', this._validationDepth, ')');
-        await this.next(); // Get next item (will validate recursively)
+        await this._loadNext(); // Get next item (will validate recursively)
         return;
       }
     }
@@ -3732,10 +3734,11 @@ class MediaCardV5a extends LitElement {
     }
     
     // Convert local media paths to media-source format
+    // /media/X -> media-source://media_source/local/X
     if (mediaPath.startsWith('/media/')) {
-      mediaPath = 'media-source://media_source' + mediaPath;
+      mediaPath = 'media-source://media_source/local' + mediaPath.substring(6);
     }
-    
+
     // Use Home Assistant's media source resolution for media-source URLs
     if (mediaPath.startsWith('media-source://')) {
       try {
@@ -7360,10 +7363,11 @@ class MediaCardV5aEditor extends LitElement {
       return mediaPath;
     }
     
+    // /media/X -> media-source://media_source/local/X
     if (mediaPath.startsWith('/media/')) {
-      mediaPath = 'media-source://media_source' + mediaPath;
+      mediaPath = 'media-source://media_source/local' + mediaPath.substring(6);
     }
-    
+
     if (mediaPath.startsWith('media-source://')) {
       try {
         const resolved = await this.hass.callWS({
@@ -10404,7 +10408,7 @@ if (!window.customCards.some(card => card.type === 'media-card')) {
 }
 
 console.info(
-  '%c  MEDIA-CARD  %c  v5.3.1 Loaded  ',
+  '%c  MEDIA-CARD  %c  v5.3.2 Loaded  ',
   'color: lime; font-weight: bold; background: black',
   'color: white; font-weight: bold; background: green'
 );
