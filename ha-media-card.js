@@ -1,5 +1,5 @@
 /**
- * Media Card v5.3.4
+ * Media Card v5.3.5
  */
 
 // Import Lit from CDN for standalone usage
@@ -2729,6 +2729,10 @@ class MediaCardV5a extends LitElement {
     this._isPaused = false; // V4 pause state for slideshow
     this._showInfoOverlay = false; // Info overlay toggle
 
+    // V5: Fullscreen state tracking
+    this._fullscreenContainer = null;
+    this._fullscreenMetadataOverlay = null;
+
     // Modal overlay state (gallery-card pattern)
     this._modalOpen = false;
     this._modalImageUrl = '';
@@ -3093,6 +3097,15 @@ class MediaCardV5a extends LitElement {
         show_root_folder: true,
         position: 'bottom-left',
         ...config.metadata
+      },
+      // V5: Fullscreen overlay defaults
+      fullscreen_overlay: {
+        show_metadata: true,
+        metadata_position: 'bottom-left',
+        show_action_buttons: true,
+        action_buttons_position: 'top-right',
+        show_navigation: true,
+        ...config.fullscreen_overlay
       }
     };
 
@@ -3307,6 +3320,9 @@ class MediaCardV5a extends LitElement {
 
         await this._resolveMediaUrl();
         this.requestUpdate();
+
+        // V5: Update fullscreen metadata overlay if in fullscreen mode
+        this._updateFullscreenMetadata();
         return;
       }
 
@@ -3420,6 +3436,9 @@ class MediaCardV5a extends LitElement {
 
       await this._resolveMediaUrl();
       this.requestUpdate();
+
+      // V5: Update fullscreen metadata overlay if in fullscreen mode
+      this._updateFullscreenMetadata();
     } else {
       console.warn('[MediaCardV5a] Invalid history index:', this.historyIndex);
     }
@@ -3810,6 +3829,9 @@ class MediaCardV5a extends LitElement {
       this._currentMetadata = this._pendingMetadata;
       this._pendingMetadata = null;
       this._log('Applied pending metadata on error to clear stale data');
+
+      // V5: Update fullscreen metadata overlay if in fullscreen mode
+      this._updateFullscreenMetadata();
     }
     if (this._pendingMediaPath !== null) {
       this._currentMediaPath = this._pendingMediaPath;
@@ -4291,6 +4313,9 @@ class MediaCardV5a extends LitElement {
     // Trigger re-render to show updated metadata/counters
     this.requestUpdate();
 
+    // V5: Update fullscreen metadata overlay if in fullscreen mode
+    this._updateFullscreenMetadata();
+
     // Apply default zoom AFTER render completes (images only)
     // This ensures the inline transform style isn't lost during re-render
     if (this.config.default_zoom && this.config.default_zoom > 1) {
@@ -4324,6 +4349,115 @@ class MediaCardV5a extends LitElement {
         ${metadataText}
       </div>
     `;
+  }
+
+  // V5: Get metadata text formatted for fullscreen overlay (HTML)
+  // Respects the same metadata config as the card view
+  _getMetadataTextForFullscreen() {
+    const metadata = this._currentMetadata;
+    if (!metadata) return '';
+
+    const metaConfig = this.config.metadata || {};
+    const parts = [];
+
+    // Folder - respects show_folder config
+    if (metaConfig.show_folder !== false && metadata.folder) {
+      const folderDisplay = this._formatFolderForDisplay(
+        metadata.folder,
+        metaConfig.show_root_folder
+      );
+      if (folderDisplay && folderDisplay.trim()) {
+        parts.push(`📁 ${folderDisplay}`);
+      }
+    }
+
+    // Filename - respects show_filename config
+    if (metaConfig.show_filename && metadata.filename) {
+      parts.push(`📄 ${metadata.filename}`);
+    }
+
+    // Date - respects show_date config
+    if (metaConfig.show_date !== false) {
+      let date = null;
+      if (metadata.date_taken) {
+        if (typeof metadata.date_taken === 'number') {
+          date = new Date(metadata.date_taken * 1000);
+        } else if (typeof metadata.date_taken === 'string') {
+          const dateStr = metadata.date_taken.replace(/^(\d{4}):(\d{2}):(\d{2})/, '$1-$2-$3');
+          date = new Date(dateStr);
+        }
+      } else if (metadata.created_time) {
+        if (typeof metadata.created_time === 'string') {
+          date = new Date(metadata.created_time);
+        } else if (typeof metadata.created_time === 'number') {
+          date = new Date(metadata.created_time * 1000);
+        }
+      } else if (metadata.date) {
+        date = metadata.date;
+      }
+
+      if (date && !isNaN(date.getTime())) {
+        const locale = this.hass?.locale?.language || this.hass?.language || navigator.language || 'en-US';
+        let dateText = `📅 ${date.toLocaleDateString(locale)}`;
+
+        // Add time if configured
+        if (metaConfig.show_time) {
+          dateText += ` ${date.toLocaleTimeString(locale)}`;
+        }
+        parts.push(dateText);
+      }
+    }
+
+    // Location - respects show_location config
+    if (metaConfig.show_location !== false && (metadata.location_city || metadata.location_country)) {
+      const locationParts = [];
+      if (metadata.location_city) locationParts.push(metadata.location_city);
+      if (metadata.location_state) locationParts.push(metadata.location_state);
+      if (metadata.location_country) locationParts.push(metadata.location_country);
+      if (locationParts.length > 0) {
+        parts.push(`📍 ${locationParts.join(', ')}`);
+      }
+    }
+
+    return parts.join('<br>');
+  }
+
+  // V5: Update fullscreen metadata overlay with current metadata
+  _updateFullscreenMetadata() {
+    if (!this._fullscreenContainer || !this._fullscreenMetadataOverlay) return;
+
+    const metadataText = this._getMetadataTextForFullscreen();
+    if (metadataText) {
+      this._fullscreenMetadataOverlay.innerHTML = metadataText;
+      this._fullscreenMetadataOverlay.style.display = 'block';
+    } else {
+      this._fullscreenMetadataOverlay.style.display = 'none';
+    }
+  }
+
+  // V5: Get CSS position styles for overlay positioning
+  _getPositionStyles(position) {
+    switch (position) {
+      case 'top-left':
+        return 'top: 20px; left: 20px;';
+      case 'top-right':
+        return 'top: 20px; right: 20px;';
+      case 'bottom-left':
+        return 'bottom: 20px; left: 20px;';
+      case 'bottom-right':
+        return 'bottom: 20px; right: 20px;';
+      default:
+        return 'bottom: 20px; left: 20px;';
+    }
+  }
+
+  // V5: Check if Media Index integration is available
+  _hasMediaIndex() {
+    if (!this.hass) return false;
+
+    // Check for media_index entity or service
+    const entities = Object.keys(this.hass.states || {});
+    return entities.some(e => e.startsWith('sensor.media_index'));
   }
 
   // V4: Format metadata for display
@@ -5459,6 +5593,9 @@ class MediaCardV5a extends LitElement {
       background: black;
     `;
 
+    // Store reference for metadata updates during navigation
+    this._fullscreenContainer = fullscreenContainer;
+
     // Store original location to restore later
     const parent = mediaElement.parentNode;
     const nextSibling = mediaElement.nextSibling;
@@ -5469,17 +5606,292 @@ class MediaCardV5a extends LitElement {
     const originalWidth = mediaElement.style.width;
     const originalHeight = mediaElement.style.height;
     const originalObjectFit = mediaElement.style.objectFit;
+    const originalTransform = mediaElement.style.transform;
+    const originalTransformOrigin = mediaElement.style.transformOrigin;
 
-    // Override styles for fullscreen display - remove max-height constraint
+    // Override styles for fullscreen display - remove max-height constraint and reset zoom
     mediaElement.style.maxHeight = '100vh';
     mediaElement.style.maxWidth = '100vw';
     mediaElement.style.width = 'auto';
     mediaElement.style.height = 'auto';
     mediaElement.style.objectFit = 'contain';
+    mediaElement.style.transform = 'none';
+    mediaElement.style.transformOrigin = 'center center';
 
     // Move media element into container temporarily
     fullscreenContainer.appendChild(mediaElement);
     fullscreenContainer.appendChild(exitButton);
+
+    // Get fullscreen overlay config
+    const fsOverlay = this.config.fullscreen_overlay || {};
+
+    // Add metadata overlay if configured
+    if (fsOverlay.show_metadata !== false) {
+      const metadataOverlay = document.createElement('div');
+      const metaPosition = fsOverlay.metadata_position || 'bottom-left';
+      const positionStyles = this._getPositionStyles(metaPosition);
+      metadataOverlay.style.cssText = `
+        position: absolute;
+        ${positionStyles}
+        background: rgba(0, 0, 0, 0.8);
+        color: white;
+        padding: 8px 14px;
+        border-radius: 6px;
+        font-size: 0.9em;
+        line-height: 1.3;
+        max-width: 400px;
+        word-break: break-word;
+        z-index: 5;
+        backdrop-filter: blur(4px);
+        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+        pointer-events: none;
+      `;
+
+      const metadataText = this._getMetadataTextForFullscreen();
+      if (metadataText) {
+        metadataOverlay.innerHTML = metadataText;
+      } else {
+        metadataOverlay.style.display = 'none';
+      }
+
+      fullscreenContainer.appendChild(metadataOverlay);
+
+      // Store reference for updates during navigation
+      this._fullscreenMetadataOverlay = metadataOverlay;
+    }
+
+    // Add action buttons if configured
+    if (fsOverlay.show_action_buttons !== false) {
+      const actionButtons = document.createElement('div');
+      const btnPosition = fsOverlay.action_buttons_position || 'top-right';
+      const btnPositionStyles = this._getPositionStyles(btnPosition);
+      actionButtons.style.cssText = `
+        position: absolute;
+        ${btnPositionStyles}
+        display: flex;
+        gap: 8px;
+        z-index: 6;
+      `;
+
+      // Helper to create action button
+      const createBtn = (icon, title, onClick) => {
+        const btn = document.createElement('button');
+        btn.style.cssText = `
+          background: rgba(0, 0, 0, 0.7);
+          border: none;
+          border-radius: 50%;
+          width: 44px;
+          height: 44px;
+          color: white;
+          font-size: 20px;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          backdrop-filter: blur(4px);
+          transition: all 0.2s;
+        `;
+        btn.innerHTML = icon;
+        btn.title = title;
+        btn.onmouseover = () => { btn.style.background = 'rgba(0, 0, 0, 0.9)'; btn.style.transform = 'scale(1.1)'; };
+        btn.onmouseout = () => { btn.style.background = 'rgba(0, 0, 0, 0.7)'; btn.style.transform = 'scale(1)'; };
+        btn.onclick = onClick;
+        return btn;
+      };
+
+      // Pause/Play button
+      const pauseIcon = this._isPaused ? '▶' : '⏸';
+      const pauseBtn = createBtn(pauseIcon, this._isPaused ? 'Play' : 'Pause', (e) => {
+        e.stopPropagation();
+        this._setPauseState(!this._isPaused);
+        pauseBtn.innerHTML = this._isPaused ? '▶' : '⏸';
+        pauseBtn.title = this._isPaused ? 'Play' : 'Pause';
+      });
+      actionButtons.appendChild(pauseBtn);
+
+      // Info button - shows info overlay in fullscreen container
+      const infoBtn = createBtn('ℹ', 'Info', (e) => {
+        e.stopPropagation();
+
+        // Check if info overlay already exists
+        let existingOverlay = fullscreenContainer.querySelector('.fullscreen-info-overlay');
+        if (existingOverlay) {
+          existingOverlay.remove();
+          return;
+        }
+
+        // Create info overlay for fullscreen
+        const infoOverlay = document.createElement('div');
+        infoOverlay.className = 'fullscreen-info-overlay';
+        infoOverlay.style.cssText = `
+          position: absolute;
+          top: 50%;
+          left: 50%;
+          transform: translate(-50%, -50%);
+          background: rgba(0, 0, 0, 0.9);
+          color: white;
+          padding: 24px;
+          border-radius: 12px;
+          max-width: 500px;
+          max-height: 80vh;
+          overflow-y: auto;
+          z-index: 100;
+          backdrop-filter: blur(10px);
+          font-size: 14px;
+          line-height: 1.5;
+        `;
+
+        // Build info content
+        const metadata = this._currentMetadata || {};
+        let infoHtml = '<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">';
+        infoHtml += '<h3 style="margin: 0; font-size: 18px;">Media Information</h3>';
+        infoHtml += '<button id="fs-info-close" style="background: none; border: none; color: white; font-size: 24px; cursor: pointer; padding: 4px;">✕</button>';
+        infoHtml += '</div>';
+
+        if (metadata.filename) {
+          infoHtml += `<div style="margin-bottom: 8px;"><strong>📄 Filename:</strong> ${metadata.filename}</div>`;
+        }
+        if (metadata.folder) {
+          infoHtml += `<div style="margin-bottom: 8px;"><strong>📁 Folder:</strong> ${metadata.folder}</div>`;
+        }
+
+        // Date
+        let dateStr = '';
+        if (metadata.date_taken) {
+          const date = typeof metadata.date_taken === 'number'
+            ? new Date(metadata.date_taken * 1000)
+            : new Date(metadata.date_taken.replace(/^(\d{4}):(\d{2}):(\d{2})/, '$1-$2-$3'));
+          if (!isNaN(date.getTime())) {
+            dateStr = date.toLocaleString();
+          }
+        } else if (metadata.created_time) {
+          const date = typeof metadata.created_time === 'string'
+            ? new Date(metadata.created_time)
+            : new Date(metadata.created_time * 1000);
+          if (!isNaN(date.getTime())) {
+            dateStr = date.toLocaleString();
+          }
+        }
+        if (dateStr) {
+          infoHtml += `<div style="margin-bottom: 8px;"><strong>📅 Date:</strong> ${dateStr}</div>`;
+        }
+
+        // Location
+        const locationParts = [];
+        if (metadata.location_city) locationParts.push(metadata.location_city);
+        if (metadata.location_state) locationParts.push(metadata.location_state);
+        if (metadata.location_country) locationParts.push(metadata.location_country);
+        if (locationParts.length > 0) {
+          infoHtml += `<div style="margin-bottom: 8px;"><strong>📍 Location:</strong> ${locationParts.join(', ')}</div>`;
+        }
+
+        // Camera info if available
+        if (metadata.camera_make || metadata.camera_model) {
+          const camera = [metadata.camera_make, metadata.camera_model].filter(Boolean).join(' ');
+          infoHtml += `<div style="margin-bottom: 8px;"><strong>📷 Camera:</strong> ${camera}</div>`;
+        }
+
+        // Dimensions if available
+        if (metadata.width && metadata.height) {
+          infoHtml += `<div style="margin-bottom: 8px;"><strong>📐 Dimensions:</strong> ${metadata.width} × ${metadata.height}</div>`;
+        }
+
+        infoOverlay.innerHTML = infoHtml;
+
+        // Close button handler
+        infoOverlay.querySelector('#fs-info-close').onclick = (ev) => {
+          ev.stopPropagation();
+          infoOverlay.remove();
+        };
+
+        // Click outside to close
+        infoOverlay.onclick = (ev) => ev.stopPropagation();
+
+        fullscreenContainer.appendChild(infoOverlay);
+      });
+      actionButtons.appendChild(infoBtn);
+
+      // Favorite button (if Media Index available)
+      const hasMediaIndex = this._hasMediaIndex();
+      if (hasMediaIndex && this.config.action_buttons?.enable_favorite !== false) {
+        const isFavorited = this._currentMetadata?.is_favorited;
+        const favIcon = isFavorited ? '❤' : '♡';
+        const favBtn = createBtn(favIcon, 'Favorite', async (e) => {
+          e.stopPropagation();
+          await this._handleFavoriteClick(e);
+          favBtn.innerHTML = this._currentMetadata?.is_favorited ? '❤' : '♡';
+        });
+        if (isFavorited) favBtn.style.color = '#ff6b6b';
+        actionButtons.appendChild(favBtn);
+      }
+
+      fullscreenContainer.appendChild(actionButtons);
+    }
+
+    // Add navigation zones if configured
+    if (fsOverlay.show_navigation !== false && this.config.media_source_type !== 'single_media') {
+      // Previous zone (left side)
+      const prevZone = document.createElement('div');
+      prevZone.style.cssText = `
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 15%;
+        height: 100%;
+        cursor: w-resize;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 4;
+        transition: background 0.2s;
+      `;
+      prevZone.title = 'Previous';
+      prevZone.onmouseenter = () => { prevZone.style.background = 'rgba(0, 0, 0, 0.3)'; prevZone.innerHTML = '<span style="color: white; font-size: 2em; text-shadow: 0 0 8px rgba(0,0,0,0.8); pointer-events: none;">◀</span>'; };
+      prevZone.onmouseleave = () => { prevZone.style.background = 'transparent'; prevZone.innerHTML = ''; };
+      prevZone.onclick = (e) => { e.stopPropagation(); this._loadPrevious(); };
+      fullscreenContainer.appendChild(prevZone);
+
+      // Next zone (right side)
+      const nextZone = document.createElement('div');
+      nextZone.style.cssText = `
+        position: absolute;
+        right: 0;
+        top: 0;
+        width: 15%;
+        height: 100%;
+        cursor: e-resize;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 4;
+        transition: background 0.2s;
+      `;
+      nextZone.title = 'Next';
+      nextZone.onmouseenter = () => { nextZone.style.background = 'rgba(0, 0, 0, 0.3)'; nextZone.innerHTML = '<span style="color: white; font-size: 2em; text-shadow: 0 0 8px rgba(0,0,0,0.8); pointer-events: none;">▶</span>'; };
+      nextZone.onmouseleave = () => { nextZone.style.background = 'transparent'; nextZone.innerHTML = ''; };
+      nextZone.onclick = (e) => { e.stopPropagation(); this._loadNext(); };
+      fullscreenContainer.appendChild(nextZone);
+    }
+
+    // Add keyboard navigation support
+    fullscreenContainer.tabIndex = 0;
+    fullscreenContainer.onkeydown = (e) => {
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        this._loadPrevious();
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        this._loadNext();
+      } else if (e.key === ' ') {
+        e.preventDefault();
+        this._setPauseState(!this._isPaused);
+      } else if (e.key === 'Escape') {
+        if (document.exitFullscreen) document.exitFullscreen();
+      }
+    };
+    // Focus container for keyboard events
+    setTimeout(() => fullscreenContainer.focus(), 100);
+
     document.body.appendChild(fullscreenContainer);
 
     // Request fullscreen on the container
@@ -5498,6 +5910,8 @@ class MediaCardV5a extends LitElement {
         mediaElement.style.width = originalWidth;
         mediaElement.style.height = originalHeight;
         mediaElement.style.objectFit = originalObjectFit;
+        mediaElement.style.transform = originalTransform;
+        mediaElement.style.transformOrigin = originalTransformOrigin;
         // Restore media element on failure
         if (nextSibling) {
           parent.insertBefore(mediaElement, nextSibling);
@@ -5518,6 +5932,8 @@ class MediaCardV5a extends LitElement {
           mediaElement.style.width = originalWidth;
           mediaElement.style.height = originalHeight;
           mediaElement.style.objectFit = originalObjectFit;
+          mediaElement.style.transform = originalTransform;
+          mediaElement.style.transformOrigin = originalTransformOrigin;
 
           // Restore media element to original location
           if (nextSibling) {
@@ -5530,6 +5946,10 @@ class MediaCardV5a extends LitElement {
           if (fullscreenContainer.parentNode) {
             document.body.removeChild(fullscreenContainer);
           }
+
+          // Clear fullscreen references
+          this._fullscreenContainer = null;
+          this._fullscreenMetadataOverlay = null;
 
           // Resume slideshow if it was paused when entering fullscreen
           // (only applies when continue_slideshow_in_fullscreen is false)
@@ -8150,6 +8570,61 @@ class MediaCardV5aEditor extends LitElement {
     this._fireConfigChanged();
   }
 
+  _fullscreenOverlayShowMetadataChanged(ev) {
+    this._config = {
+      ...this._config,
+      fullscreen_overlay: {
+        ...this._config.fullscreen_overlay,
+        show_metadata: ev.target.checked
+      }
+    };
+    this._fireConfigChanged();
+  }
+
+  _fullscreenOverlayMetadataPositionChanged(ev) {
+    this._config = {
+      ...this._config,
+      fullscreen_overlay: {
+        ...this._config.fullscreen_overlay,
+        metadata_position: ev.target.value
+      }
+    };
+    this._fireConfigChanged();
+  }
+
+  _fullscreenOverlayShowButtonsChanged(ev) {
+    this._config = {
+      ...this._config,
+      fullscreen_overlay: {
+        ...this._config.fullscreen_overlay,
+        show_action_buttons: ev.target.checked
+      }
+    };
+    this._fireConfigChanged();
+  }
+
+  _fullscreenOverlayButtonsPositionChanged(ev) {
+    this._config = {
+      ...this._config,
+      fullscreen_overlay: {
+        ...this._config.fullscreen_overlay,
+        action_buttons_position: ev.target.value
+      }
+    };
+    this._fireConfigChanged();
+  }
+
+  _fullscreenOverlayShowNavigationChanged(ev) {
+    this._config = {
+      ...this._config,
+      fullscreen_overlay: {
+        ...this._config.fullscreen_overlay,
+        show_navigation: ev.target.checked
+      }
+    };
+    this._fireConfigChanged();
+  }
+
   _actionButtonsPositionChanged(ev) {
     this._config = {
       ...this._config,
@@ -10232,6 +10707,72 @@ Tip: Check your Home Assistant media folder in Settings > System > Storage`;
               <div class="help-text">Keep slideshow running when in fullscreen mode (useful for presentations or ambient displays)</div>
             </div>
           </div>
+
+          <div class="config-row">
+            <label>Show Metadata in Fullscreen</label>
+            <div>
+              <input
+                type="checkbox"
+                .checked=${this._config.fullscreen_overlay?.show_metadata !== false}
+                @change=${this._fullscreenOverlayShowMetadataChanged}
+              />
+              <div class="help-text">Display filename, date, and location overlay in fullscreen mode</div>
+            </div>
+          </div>
+
+          ${this._config.fullscreen_overlay?.show_metadata !== false ? html`
+            <div class="config-row">
+              <label>Metadata Position</label>
+              <div>
+                <select @change=${this._fullscreenOverlayMetadataPositionChanged} .value=${this._config.fullscreen_overlay?.metadata_position || 'bottom-left'}>
+                  <option value="bottom-left">Bottom Left</option>
+                  <option value="bottom-right">Bottom Right</option>
+                  <option value="top-left">Top Left</option>
+                  <option value="top-right">Top Right</option>
+                </select>
+                <div class="help-text">Position of metadata overlay in fullscreen</div>
+              </div>
+            </div>
+          ` : ''}
+
+          <div class="config-row">
+            <label>Show Action Buttons in Fullscreen</label>
+            <div>
+              <input
+                type="checkbox"
+                .checked=${this._config.fullscreen_overlay?.show_action_buttons !== false}
+                @change=${this._fullscreenOverlayShowButtonsChanged}
+              />
+              <div class="help-text">Display pause, info, and favorite buttons in fullscreen mode</div>
+            </div>
+          </div>
+
+          ${this._config.fullscreen_overlay?.show_action_buttons !== false ? html`
+            <div class="config-row">
+              <label>Buttons Position</label>
+              <div>
+                <select @change=${this._fullscreenOverlayButtonsPositionChanged} .value=${this._config.fullscreen_overlay?.action_buttons_position || 'top-right'}>
+                  <option value="top-right">Top Right</option>
+                  <option value="top-left">Top Left</option>
+                  <option value="bottom-right">Bottom Right</option>
+                  <option value="bottom-left">Bottom Left</option>
+                </select>
+                <div class="help-text">Position of action buttons in fullscreen</div>
+              </div>
+            </div>
+          ` : ''}
+
+          <div class="config-row">
+            <label>Show Navigation in Fullscreen</label>
+            <div>
+              <input
+                type="checkbox"
+                .checked=${this._config.fullscreen_overlay?.show_navigation !== false}
+                @change=${this._fullscreenOverlayShowNavigationChanged}
+              />
+              <div class="help-text">Show left/right navigation zones and enable keyboard navigation in fullscreen</div>
+            </div>
+          </div>
         </div>
 
         ${hasMediaIndex ? html`
@@ -10431,7 +10972,7 @@ if (!window.customCards.some(card => card.type === 'media-card')) {
 }
 
 console.info(
-  '%c  MEDIA-CARD  %c  v5.3.4 Loaded  ',
+  '%c  MEDIA-CARD  %c  v5.3.5 Loaded  ',
   'color: lime; font-weight: bold; background: black',
   'color: white; font-weight: bold; background: green'
 );
