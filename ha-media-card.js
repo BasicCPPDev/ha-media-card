@@ -1,5 +1,5 @@
 /**
- * Media Card v5.3.2
+ * Media Card v5.3.3
  */
 
 // Import Lit from CDN for standalone usage
@@ -3081,6 +3081,8 @@ class MediaCardV5a extends LitElement {
       // V5: Video defaults - autoplay and muted for better UX
       video_autoplay: true,
       video_muted: true,
+      // V5: Fullscreen behavior - by default pause slideshow when entering fullscreen
+      continue_slideshow_in_fullscreen: false,
       ...config,
       metadata: {
         show_filename: false,
@@ -5403,10 +5405,10 @@ class MediaCardV5a extends LitElement {
     
     if (!mediaElement) return;
     
-    // Always pause slideshow when entering fullscreen (for examination)
+    // Pause slideshow when entering fullscreen (unless configured to continue)
     this._fullscreenWasPaused = this._isPaused;
-    
-    if (!this._isPaused) {
+
+    if (!this.config.continue_slideshow_in_fullscreen && !this._isPaused) {
       this._setPauseState(true);
     }
     
@@ -5529,7 +5531,8 @@ class MediaCardV5a extends LitElement {
             document.body.removeChild(fullscreenContainer);
           }
           
-          // Resume slideshow if needed
+          // Resume slideshow if it was paused when entering fullscreen
+          // (only applies when continue_slideshow_in_fullscreen is false)
           if (!this._fullscreenWasPaused && this._isPaused) {
             this._setPauseState(false);
           }
@@ -8139,6 +8142,14 @@ class MediaCardV5aEditor extends LitElement {
     this._fireConfigChanged();
   }
 
+  _continueSlideshowInFullscreenChanged(ev) {
+    this._config = {
+      ...this._config,
+      continue_slideshow_in_fullscreen: ev.target.checked
+    };
+    this._fireConfigChanged();
+  }
+
   _actionButtonsPositionChanged(ev) {
     this._config = {
       ...this._config,
@@ -10209,6 +10220,18 @@ Tip: Check your Home Assistant media folder in Settings > System > Storage`;
               <div class="help-text">Show fullscreen button to automatically pause and initiate full screen mode (see Kiosk mode for automatic full screen options)</div>
             </div>
           </div>
+
+          <div class="config-row">
+            <label>Continue Slideshow in Fullscreen</label>
+            <div>
+              <input
+                type="checkbox"
+                .checked=${this._config.continue_slideshow_in_fullscreen === true}
+                @change=${this._continueSlideshowInFullscreenChanged}
+              />
+              <div class="help-text">Keep slideshow running when in fullscreen mode (useful for presentations or ambient displays)</div>
+            </div>
+          </div>
         </div>
 
         ${hasMediaIndex ? html`
@@ -10408,7 +10431,7 @@ if (!window.customCards.some(card => card.type === 'media-card')) {
 }
 
 console.info(
-  '%c  MEDIA-CARD  %c  v5.3.2 Loaded  ',
+  '%c  MEDIA-CARD  %c  v5.3.3 Loaded  ',
   'color: lime; font-weight: bold; background: black',
   'color: white; font-weight: bold; background: green'
 );
